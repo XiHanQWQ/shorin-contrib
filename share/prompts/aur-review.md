@@ -45,7 +45,9 @@ From AUR RPC, extract at least:
 - Depends
 - MakeDepends
 
-Read the local build files from the current working directory. Do not fetch PKGBUILD or accompanying files from AUR cgit, AUR snapshot, or AUR plain URLs. pac already fetched the build files with the selected AUR helper before invoking this review.
+Read the local AUR packaging files from the current working directory. Do not fetch PKGBUILD or accompanying files from AUR cgit, AUR snapshot, or AUR plain URLs. pac already fetched the build files with the selected AUR helper before invoking this review.
+
+Review only AUR packaging files such as `PKGBUILD`, `.SRCINFO`, `.install`, patches, services, scripts, desktop files, sysusers, and tmpfiles. Do not recursively audit downloaded upstream source trees, VCS checkouts, `src/`, `pkg/`, or built artifacts if they are present. The purpose is PKGBUILD/build-file review, not full upstream source review.
 
 Required local reads:
 
