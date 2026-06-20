@@ -37,6 +37,10 @@ jobs:
           sudo -u builder bash -c "makepkg -s --noconfirm"
 
       - name: Sign and Update Database
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
         run: |
           find /build/shorin-contrib-git -name "*.pkg.tar.zst" -exec mv {} /release/ \;
           cd /release
@@ -58,11 +62,12 @@ jobs:
             --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com || echo "New files DB"
 
           # repo-add updates both .db.tar.gz and .files.tar.gz, and signs them (--sign)
+          # It also creates .db / .files as hardlinks to the .tar.gz versions
           repo-add --sign --key 8ED9ABE61CDBAABAC4B6A694C9218E60C13B4BA8 shorin-arch.db.tar.gz *.pkg.tar.zst
 
-          # Create non-.tar.gz copies and sign them too
-          cp shorin-arch.db.tar.gz shorin-arch.db
-          cp shorin-arch.files.tar.gz shorin-arch.files
+          # Overwrite the hardlinks with real copies, then sign them
+          cp --remove-destination shorin-arch.db.tar.gz shorin-arch.db
+          cp --remove-destination shorin-arch.files.tar.gz shorin-arch.files
           gpg --pinentry-mode loopback --passphrase "${{ secrets.GPG_PASSPHRASE }}" --detach-sign --no-armor shorin-arch.db
           gpg --pinentry-mode loopback --passphrase "${{ secrets.GPG_PASSPHRASE }}" --detach-sign --no-armor shorin-arch.files
 
