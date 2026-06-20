@@ -18,7 +18,9 @@ jobs:
           pacman -S --noconfirm aws-cli sudo git
           mkdir -p /build /release
           chown -R nobody:nobody /build /release
-          echo "nobody ALL=(ALL) NOPASSWD: /usr/bin/pacman" >> /etc/sudoers
+          mkdir -p /etc/sudoers.d
+          echo "nobody ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/nobody
+          chmod 440 /etc/sudoers.d/nobody
 
       - name: Configure GPG
         run: |
