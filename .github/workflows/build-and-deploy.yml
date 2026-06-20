@@ -36,11 +36,7 @@ jobs:
           cd shorin-contrib-git
           sudo -u builder bash -c "makepkg -s --noconfirm"
 
-      - name: Sign and Update Database
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
+      - name: Sign packages
         run: |
           find /build/shorin-contrib-git -name "*.pkg.tar.zst" -exec mv {} /release/ \;
           cd /release
@@ -50,50 +46,28 @@ jobs:
             exit 1
           fi
 
-          # Sign each package
           for PKG in *.pkg.tar.zst; do
             gpg --batch --pinentry-mode loopback --passphrase "${{ secrets.GPG_PASSPHRASE }}" --detach-sign --no-armor "$PKG"
           done
 
-          # Fetch existing databases from R2 (ignore errors on first run)
-          aws s3 cp s3://shorin-arch-repo/archlinux/x86_64/shorin-arch.db.tar.gz ./shorin-arch.db.tar.gz \
-            --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com || echo "New DB"
-          aws s3 cp s3://shorin-arch-repo/archlinux/x86_64/shorin-arch.files.tar.gz ./shorin-arch.files.tar.gz \
-            --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com || echo "New files DB"
-
-          # repo-add updates both .db.tar.gz and .files.tar.gz, and signs them (--sign)
-          # It also creates .db/.files and their .sig as symlinks to the .tar.gz versions.
-          # aws s3 cp --recursive follows symlinks, so they upload as real files.
-          repo-add --sign --key 8ED9ABE61CDBAABAC4B6A694C9218E60C13B4BA8 shorin-arch.db.tar.gz *.pkg.tar.zst
-
-          # Remove repo-add backup files (.old) so they are not uploaded to R2
-          rm -f *.old
-
-      - name: Clean up old packages on R2
+      - name: Remove old packages on R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
         run: |
-          # Only remove old versions of packages built in THIS run.
-          # Extract package base name (everything before the first -<version>)
-          # from local packages, then delete R2 packages with the same base
-          # name but different filename.
           cd /release
 
           R2_PREFIX="s3://shorin-arch-repo/archlinux/x86_64/"
           ENDPOINT="--endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
 
           for LOCAL_PKG in *.pkg.tar.zst; do
-            # Extract base name: strip -<version>-<rel>-<arch>.pkg.tar.zst
             BASE_NAME=$(echo "$LOCAL_PKG" | sed -E 's/-[^-]+-[^-]+-[^-]+\.pkg\.tar\.zst$//')
 
             echo "Looking for old versions of: $BASE_NAME"
             for R2_OBJ in $(aws s3 ls ${R2_PREFIX} ${ENDPOINT} | awk '{print $4}' | grep "\.pkg\.tar\.zst$"); do
-              # Skip if it is the current package
               [ "$R2_OBJ" = "$LOCAL_PKG" ] && continue
 
-              # Check if this R2 package has the same base name
               R2_BASE=$(echo "$R2_OBJ" | sed -E 's/-[^-]+-[^-]+-[^-]+\.pkg\.tar\.zst$//')
               [ "$R2_BASE" = "$BASE_NAME" ] || continue
 
@@ -103,13 +77,7 @@ jobs:
             done
           done
 
-          # Remove any stale .old backup files left by previous repo-add runs
-          for R2_OBJ in $(aws s3 ls ${R2_PREFIX} ${ENDPOINT} | awk '{print $4}' | grep '\.old$'); do
-            echo "Removing stale backup: $R2_OBJ"
-            aws s3 rm "${R2_PREFIX}${R2_OBJ}" ${ENDPOINT}
-          done
-
-      - name: Sync to Cloudflare R2
+      - name: Upload packages to R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -118,5 +86,6 @@ jobs:
           cd /release
           aws s3 cp . s3://shorin-arch-repo/archlinux/x86_64/ \
             --recursive \
-            --include "*" \
+            --include "*.pkg.tar.zst" \
+            --include "*.pkg.tar.zst.sig" \
             --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
