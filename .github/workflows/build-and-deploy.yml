@@ -52,7 +52,7 @@ jobs:
 
           # Sign each package
           for PKG in *.pkg.tar.zst; do
-            gpg --pinentry-mode loopback --passphrase "${{ secrets.GPG_PASSPHRASE }}" --detach-sign --no-armor "$PKG"
+            gpg --batch --pinentry-mode loopback --passphrase "${{ secrets.GPG_PASSPHRASE }}" --detach-sign --no-armor "$PKG"
           done
 
           # Fetch existing databases from R2 (ignore errors on first run)
@@ -62,14 +62,12 @@ jobs:
             --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com || echo "New files DB"
 
           # repo-add updates both .db.tar.gz and .files.tar.gz, and signs them (--sign)
-          # It also creates .db / .files as hardlinks to the .tar.gz versions
+          # It also creates .db/.files and their .sig as symlinks to the .tar.gz versions.
+          # aws s3 cp --recursive follows symlinks, so they upload as real files.
           repo-add --sign --key 8ED9ABE61CDBAABAC4B6A694C9218E60C13B4BA8 shorin-arch.db.tar.gz *.pkg.tar.zst
 
-          # Overwrite the hardlinks with real copies, then sign them
-          cp --remove-destination shorin-arch.db.tar.gz shorin-arch.db
-          cp --remove-destination shorin-arch.files.tar.gz shorin-arch.files
-          gpg --pinentry-mode loopback --passphrase "${{ secrets.GPG_PASSPHRASE }}" --detach-sign --no-armor shorin-arch.db
-          gpg --pinentry-mode loopback --passphrase "${{ secrets.GPG_PASSPHRASE }}" --detach-sign --no-armor shorin-arch.files
+          # Remove repo-add backup files (.old) so they are not uploaded to R2
+          rm -f *.old
 
       - name: Clean up old packages on R2
         env:
@@ -93,6 +91,12 @@ jobs:
             aws s3 rm "${R2_PREFIX}${R2_OBJ}" ${ENDPOINT}
             # Also remove its signature if present
             aws s3 rm "${R2_PREFIX}${R2_OBJ}.sig" ${ENDPOINT} 2>/dev/null || true
+          done
+
+          # Remove any stale .old backup files left by previous repo-add runs
+          for R2_OBJ in $(aws s3 ls ${R2_PREFIX} ${ENDPOINT} | awk '{print $4}' | grep '\.old$'); do
+            echo "Removing stale backup: $R2_OBJ"
+            aws s3 rm "${R2_PREFIX}${R2_OBJ}" ${ENDPOINT}
           done
 
       - name: Sync to Cloudflare R2
