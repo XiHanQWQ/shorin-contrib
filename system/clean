@@ -3,7 +3,7 @@
 # Description: Clean system
 
 # 【功能说明】
-# 1. 移除孤儿软件包 (Orphans)
+# 1. 移除孤儿软件包与无主 debug 符号包 (Orphans & orphaned debug packages)
 # 2. 清理软件包缓存 (默认保留安装包，all 模式下完全清空)
 # 3. 清理残留的下载目录 (download-*)
 # 4. 清理 Systemd 日志 (只保留最近 2 周)
@@ -67,7 +67,7 @@ if [[ "$UI_LANG" == "zh" ]]; then
 
   MSG[INTRO_HEADER]="=== Arch Linux 系统清理助手 ==="
   MSG[DESC_TITLE]="本脚本将执行以下清理操作："
-  MSG[DESC_1]="1. 删除孤儿软件包 (不再被需要的依赖)"
+  MSG[DESC_1]="1. 删除孤儿软件包与无主 debug 符号包"
   MSG[DESC_2]="2. 清理软件包缓存 (仅保留已安装版本)"
   MSG[DESC_3]="3. 清理 systemd 日志 (保留最近2周)"
   MSG[DESC_4]="4. 清空回收站、缩略图和剪贴板缓存"
@@ -86,6 +86,7 @@ if [[ "$UI_LANG" == "zh" ]]; then
   MSG[HELPER_USE]="使用包管理器：%s"
   MSG[STEP_ORPHAN]="正在检查孤儿软件包..."
   MSG[ORPHAN_FOUND]="发现孤儿软件包，准备清理..."
+  MSG[ORPHAN_DEBUG_FOUND]="发现无主包的 debug 符号包，准备清理..."
   MSG[ORPHAN_CLEAN]="已删除孤儿软件包。"
   MSG[ORPHAN_NONE]="未发现孤儿软件包。"
   
@@ -122,7 +123,7 @@ else
 
   MSG[INTRO_HEADER]="=== Arch Linux System Cleanup Assistant ==="
   MSG[DESC_TITLE]="The script will perform the following tasks:"
-  MSG[DESC_1]="1. Remove orphaned packages"
+  MSG[DESC_1]="1. Remove orphaned packages & orphaned debug packages"
   MSG[DESC_2]="2. Clean package cache (keep installed)"
   MSG[DESC_3]="3. Vacuum systemd journal logs (keep 2 weeks)"
   MSG[DESC_4]="4. Empty Trash, thumbnail and clipboard cache"
@@ -141,6 +142,7 @@ else
   MSG[HELPER_USE]="Using package manager: %s"
   MSG[STEP_ORPHAN]="Checking for orphaned packages..."
   MSG[ORPHAN_FOUND]="Orphaned packages detected, cleaning..."
+  MSG[ORPHAN_DEBUG_FOUND]="Orphaned debug packages (no main package) detected, cleaning..."
   MSG[ORPHAN_CLEAN]="Orphaned packages removed."
   MSG[ORPHAN_NONE]="No orphaned packages found."
   
@@ -235,12 +237,35 @@ else
   _error "Sudo failed."
 fi
 
-# [1] Orphans (利用 mapfile 与 Bash 数组处理)
+# [1] Orphans & 孤儿 debug 包 (利用 mapfile 与 Bash 数组处理)
 _info "${MSG[STEP_ORPHAN]}"
+
+# 收集传统孤儿包 (作为依赖安装但不再被任何包需要)
 ORPHANS=$(pacman -Qtdq || true)
+
+# 收集无主包的 -debug 符号包 (主包已卸载，debug 包残留)
+ORPHAN_DEBUGS=""
+while IFS= read -r dbg_pkg; do
+  base="${dbg_pkg%-debug}"
+  [[ -z "$base" ]] && continue
+  if ! pacman -Qi "$base" >/dev/null 2>&1; then
+    ORPHAN_DEBUGS="${ORPHAN_DEBUGS:+$ORPHAN_DEBUGS$'\n'}$dbg_pkg"
+  fi
+done < <(pacman -Qq 2>/dev/null | grep -- '-debug$' || true)
+
+# 合并两类孤儿包并一次性清理
+ALL_ORPHANS=""
 if [[ -n "$ORPHANS" ]]; then
   _warn "${MSG[ORPHAN_FOUND]}"
-  mapfile -t ORPHAN_ARR <<< "$ORPHANS"
+  ALL_ORPHANS="$ORPHANS"
+fi
+if [[ -n "$ORPHAN_DEBUGS" ]]; then
+  _warn "${MSG[ORPHAN_DEBUG_FOUND]}"
+  ALL_ORPHANS="${ALL_ORPHANS:+$ALL_ORPHANS$'\n'}$ORPHAN_DEBUGS"
+fi
+
+if [[ -n "$ALL_ORPHANS" ]]; then
+  mapfile -t ORPHAN_ARR <<< "$ALL_ORPHANS"
   $PKG_MNGR -Rns "${ORPHAN_ARR[@]}"
   _success "${MSG[ORPHAN_CLEAN]}"
 else
